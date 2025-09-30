@@ -1,0 +1,197 @@
+basePath: /
+definitions:
+  auth-app_internal_models.AuthResponse:
+    description: Authentication response with JWT token
+    properties:
+      token:
+        description: JWT token for authentication
+        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        type: string
+      user:
+        allOf:
+        - $ref: '#/definitions/auth-app_internal_models.User'
+        description: User information
+    type: object
+  auth-app_internal_models.ErrorResponse:
+    description: Error response format
+    properties:
+      error:
+        description: Error message
+        example: Error description
+        type: string
+    type: object
+  auth-app_internal_models.LoginRequest:
+    description: Login request payload
+    properties:
+      password:
+        description: Password for login
+        example: securepassword123
+        type: string
+      username:
+        description: Username for login
+        example: john_doe
+        type: string
+    type: object
+  auth-app_internal_models.User:
+    description: User information
+    properties:
+      created_at:
+        description: Creation timestamp
+        example: "2023-01-01T00:00:00Z"
+        type: string
+      email:
+        description: Email address
+        example: john@example.com
+        type: string
+      id:
+        description: User ID
+        example: 1
+        type: integer
+      updated_at:
+        description: Last update timestamp
+        example: "2023-01-01T00:00:00Z"
+        type: string
+      username:
+        description: Username
+        example: john_doe
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@authapp.com
+    name: API Support
+  description: JWT Authentication API with PostgreSQL
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Auth API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Check API health status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: API is healthy
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - health
+  /login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user and return JWT token
+      parameters:
+      - description: Login credentials
+        in: body
+        name: credentials
+        required: true
+        schema:
+          $ref: '#/definitions/auth-app_internal_models.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login successful
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.AuthResponse'
+        "400":
+          description: Invalid request body
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+        "401":
+          description: Invalid credentials
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+      summary: User login
+      tags:
+      - auth
+  /profile:
+    get:
+      consumes:
+      - application/json
+      description: Get current user profile information
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User profile
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.User'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get user profile
+      tags:
+      - user
+  /register:
+    post:
+      consumes:
+      - application/json
+      description: Create a new user account
+      parameters:
+      - description: User registration data
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/auth-app_internal_models.User'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: User created successfully
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request body
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+        "409":
+          description: User already exists
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+      summary: Register a new user
+      tags:
+      - auth
+schemes:
+- http
+securityDefinitions:
+  BearerAuth:
+    description: JWT Authorization header using the Bearer scheme
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

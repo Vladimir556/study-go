@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"auth-app/internal/config"
@@ -130,4 +131,79 @@ func (r *UserRepository) GetUserByID(id int) (*models.User, error) {
 	}
 
 	return &user, nil
+}
+
+// UpdateUser updates user profile information
+func (r *UserRepository) UpdateUser(userID int, updateData map[string]interface{}) error {
+	if len(updateData) == 0 {
+		return fmt.Errorf("no fields to update")
+	}
+
+	// Базовый запрос
+	query := "UPDATE users SET "
+
+	// Собираем SET части
+	setParts := []string{}
+	params := []interface{}{}
+	paramCount := 1
+
+	for field, value := range updateData {
+		if field == "password" {
+			setParts = append(setParts, fmt.Sprintf("password = $%d", paramCount))
+		} else {
+			setParts = append(setParts, fmt.Sprintf("%s = $%d", field, paramCount))
+		}
+		params = append(params, value)
+		paramCount++
+	}
+
+	// Добавляем updated_at
+	setParts = append(setParts, "updated_at = CURRENT_TIMESTAMP")
+
+	// Собираем полный запрос
+	query += strings.Join(setParts, ", ")
+	query += fmt.Sprintf(" WHERE id = $%d", paramCount)
+	params = append(params, userID)
+
+	result, err := r.db.Exec(query, params...)
+	if err != nil {
+		return fmt.Errorf("error updating user: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error checking rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	return nil
+}
+
+// CheckUsernameExists checks if username exists (excluding current user)
+func (r *UserRepository) CheckUsernameExists(username string, excludeUserID int) (bool, error) {
+	var exists bool
+	query := "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND id != $2)"
+
+	err := r.db.Get(&exists, query, username, excludeUserID)
+	if err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
+// CheckEmailExists checks if email exists (excluding current user)
+func (r *UserRepository) CheckEmailExists(email string, excludeUserID int) (bool, error) {
+	var exists bool
+	query := "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND id != $2)"
+
+	err := r.db.Get(&exists, query, email, excludeUserID)
+	if err != nil {
+		return false, err
+	}
+
+	return exists, nil
 }

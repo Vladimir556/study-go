@@ -43,3 +43,23 @@ type ErrorResponse struct {
 	// Error message
 	Error string `json:"error" example:"Error description"`
 }
+
+// UpdateProfileRequest represents profile update data
+// @Description Profile update request payload
+type UpdateProfileRequest struct {
+	// Username for update
+	Username string `json:"username,omitempty" example:"new_username"`
+	// Email for update
+	Email string `json:"email,omitempty" example:"new_email@example.com"`
+	// Password for update
+	Password string `json:"password,omitempty" example:"newpassword123"`
+}
+
+// UpdateProfileResponse represents profile update response
+// @Description Profile update response
+type UpdateProfileResponse struct {
+	// Success message
+	Message string `json:"message" example:"Profile updated successfully"`
+	// Updated user information
+	User User `json:"user"`
+}

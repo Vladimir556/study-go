@@ -24,6 +24,11 @@ type Config struct {
 	Env        string `env:"ENVIRONMENT" envDefault:"development"`
 
 	EnableSwagger bool `env:"ENABLE_SWAGGER" envDefault:"true"`
+
+	KafkaBrokers string `env:"KAFKA_BROKERS" envDefault:"localhost:9092"`
+	KafkaGroupID string `env:"KAFKA_GROUP_ID" envDefault:"auth-app"`
+	KafkaTopics  string `env:"KAFKA_TOPICS" envDefault:"user-registered,user-logged-in"`
+	KafkaEnabled bool   `env:"KAFKA_ENABLED" envDefault:"false"`
 }
 
 func Load() *Config {
@@ -46,6 +51,11 @@ func Load() *Config {
 		Env:        getEnv("ENVIRONMENT", "development"),
 
 		EnableSwagger: getEnvAsBool("ENABLE_SWAGGER", true),
+
+		KafkaBrokers: getEnv("KAFKA_BROKERS", "localhost:9092"),
+		KafkaGroupID: getEnv("KAFKA_GROUP_ID", "auth-app"),
+		KafkaTopics:  getEnv("KAFKA_TOPICS", "user-registered,user-logged-in"),
+		KafkaEnabled: getEnvAsBool("KAFKA_ENABLED", false),
 	}
 }
 

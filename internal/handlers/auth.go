@@ -5,21 +5,27 @@ import (
 	"auth-app/internal/models"
 	"auth-app/internal/repository"
 	"auth-app/internal/service"
+	"context"
 	"encoding/json"
-	"net/http"
-
 	"golang.org/x/crypto/bcrypt"
+	"log"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
 )
 
 type AuthHandler struct {
-	jwtService *service.JWTService
-	userRepo   *repository.UserRepository
+	jwtService   *service.JWTService
+	userRepo     *repository.UserRepository
+	kafkaService *service.KafkaService
 }
 
-func NewAuthHandler(jwtService *service.JWTService, userRepo *repository.UserRepository) *AuthHandler {
+func NewAuthHandler(jwtService *service.JWTService, userRepo *repository.UserRepository, kafkaService *service.KafkaService) *AuthHandler {
 	return &AuthHandler{
-		jwtService: jwtService,
-		userRepo:   userRepo,
+		jwtService:   jwtService,
+		userRepo:     userRepo,
+		kafkaService: kafkaService,
 	}
 }
 
@@ -83,6 +89,23 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if err := h.userRepo.CreateUser(&user); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error creating user")
 		return
+	}
+
+	// Отправляем событие в Kafka
+	if h.kafkaService != nil {
+		eventData := models.UserRegisteredEvent{
+			UserID:    user.ID,
+			Username:  user.Username,
+			Email:     user.Email,
+			CreatedAt: user.CreatedAt,
+		}
+
+		go func() {
+			ctx := context.Background()
+			if err := h.kafkaService.ProduceEvent(ctx, models.UserRegistered, eventData); err != nil {
+				log.Printf("Failed to produce registration event: %v", err)
+			}
+		}()
 	}
 
 	// Очищаем пароль в ответе
@@ -154,6 +177,23 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+
+	// Отправляем событие в Kafka
+	if h.kafkaService != nil {
+		eventData := models.UserLoggedInEvent{
+			UserID:    user.ID,
+			Username:  user.Username,
+			LoginTime: time.Now(),
+			IPAddress: getIPAddress(r),
+		}
+
+		go func() {
+			ctx := context.Background()
+			if err := h.kafkaService.ProduceEvent(ctx, models.UserLoggedIn, eventData); err != nil {
+				log.Printf("Failed to produce login event: %v", err)
+			}
+		}()
+	}
 }
 
 // Profile godoc
@@ -174,6 +214,22 @@ func (h *AuthHandler) Profile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Отправляем событие просмотра профиля
+	if h.kafkaService != nil {
+		eventData := models.UserProfileViewedEvent{
+			UserID:    claims.UserID,
+			ViewTime:  time.Now(),
+			UserAgent: r.UserAgent(),
+		}
+
+		go func() {
+			ctx := context.Background()
+			if err := h.kafkaService.ProduceEvent(ctx, models.UserProfileViewed, eventData); err != nil {
+				log.Printf("Failed to produce profile view event: %v", err)
+			}
+		}()
+	}
+
 	user, err := h.userRepo.GetUserByID(claims.UserID)
 	if err != nil || user == nil {
 		respondWithError(w, http.StatusNotFound, "User not found")
@@ -184,6 +240,15 @@ func (h *AuthHandler) Profile(w http.ResponseWriter, r *http.Request) {
 	user.Password = ""
 
 	json.NewEncoder(w).Encode(user)
+}
+
+// Вспомогательная функция для получения IP
+func getIPAddress(r *http.Request) string {
+	forwarded := r.Header.Get("X-Forwarded-For")
+	if forwarded != "" {
+		return strings.Split(forwarded, ",")[0]
+	}
+	return r.RemoteAddr
 }
 
 // HealthCheck godoc
@@ -214,4 +279,160 @@ func hashPassword(password string) (string, error) {
 func checkPasswordHash(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
+}
+
+// UpdateProfile godoc
+// @Summary Update user profile
+// @Description Update current user profile information
+// @Tags user
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param updateData body models.UpdateProfileRequest true "Profile update data"
+// @Success 200 {object} models.UpdateProfileResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 401 {object} models.ErrorResponse
+// @Failure 409 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /profile [put]
+func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserFromContext(r)
+	if claims == nil {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var updateReq models.UpdateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Валидация - хотя бы одно поле должно быть заполнено
+	if updateReq.Username == "" && updateReq.Email == "" && updateReq.Password == "" {
+		respondWithError(w, http.StatusBadRequest, "At least one field (username, email, or password) must be provided")
+		return
+	}
+
+	// Подготавливаем данные для обновления
+	updateData := make(map[string]interface{})
+
+	// Проверка и подготовка username
+	if updateReq.Username != "" {
+		if len(updateReq.Username) < 3 {
+			respondWithError(w, http.StatusBadRequest, "Username must be at least 3 characters long")
+			return
+		}
+
+		// Проверяем что username не занят другим пользователем
+		exists, err := h.userRepo.CheckUsernameExists(updateReq.Username, claims.UserID)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Error checking username availability")
+			return
+		}
+		if exists {
+			respondWithError(w, http.StatusConflict, "Username already taken")
+			return
+		}
+
+		updateData["username"] = updateReq.Username
+	}
+
+	// Проверка и подготовка email
+	if updateReq.Email != "" {
+		if !isValidEmail(updateReq.Email) {
+			respondWithError(w, http.StatusBadRequest, "Invalid email format")
+			return
+		}
+
+		// Проверяем что email не занят другим пользователем
+		exists, err := h.userRepo.CheckEmailExists(updateReq.Email, claims.UserID)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Error checking email availability")
+			return
+		}
+		if exists {
+			respondWithError(w, http.StatusConflict, "Email already registered")
+			return
+		}
+
+		updateData["email"] = updateReq.Email
+	}
+
+	// Подготовка password
+	if updateReq.Password != "" {
+		if len(updateReq.Password) < 6 {
+			respondWithError(w, http.StatusBadRequest, "Password must be at least 6 characters long")
+			return
+		}
+
+		hashedPassword, err := hashPassword(updateReq.Password)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Error processing password")
+			return
+		}
+		updateData["password"] = hashedPassword
+	}
+
+	// Обновляем пользователя в БД
+	if err := h.userRepo.UpdateUser(claims.UserID, updateData); err != nil {
+		log.Printf("Error updating user: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error updating profile")
+		return
+	}
+
+	// Отправляем событие в Kafka (если есть изменения)
+	if h.kafkaService != nil && (updateReq.Username != "" || updateReq.Email != "") {
+		eventData := models.UserProfileUpdatedEvent{
+			UserID:        claims.UserID,
+			UpdatedAt:     time.Now(),
+			UpdatedFields: getUpdatedFields(updateReq),
+		}
+
+		go func() {
+			ctx := context.Background()
+			if err := h.kafkaService.ProduceEvent(ctx, "user.profile.updated", eventData); err != nil {
+				log.Printf("Failed to produce profile update event: %v", err)
+			}
+		}()
+	}
+
+	// Получаем обновленные данные пользователя
+	updatedUser, err := h.userRepo.GetUserByID(claims.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error fetching updated profile")
+		return
+	}
+
+	// Очищаем пароль в ответе
+	updatedUser.Password = ""
+
+	response := models.UpdateProfileResponse{
+		Message: "Profile updated successfully",
+		User:    *updatedUser,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// Вспомогательные функции
+func isValidEmail(email string) bool {
+	emailRegex := `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
+	matched, _ := regexp.MatchString(emailRegex, email)
+	return matched
+}
+
+func getUpdatedFields(updateReq models.UpdateProfileRequest) []string {
+	var fields []string
+	if updateReq.Username != "" {
+		fields = append(fields, "username")
+	}
+	if updateReq.Email != "" {
+		fields = append(fields, "email")
+	}
+	if updateReq.Password != "" {
+		fields = append(fields, "password")
+	}
+	return fields
 }

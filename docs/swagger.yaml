@@ -32,6 +32,34 @@ definitions:
         example: john_doe
         type: string
     type: object
+  auth-app_internal_models.UpdateProfileRequest:
+    description: Profile update request payload
+    properties:
+      email:
+        description: Email for update
+        example: new_email@example.com
+        type: string
+      password:
+        description: Password for update
+        example: newpassword123
+        type: string
+      username:
+        description: Username for update
+        example: new_username
+        type: string
+    type: object
+  auth-app_internal_models.UpdateProfileResponse:
+    description: Profile update response
+    properties:
+      message:
+        description: Success message
+        example: Profile updated successfully
+        type: string
+      user:
+        allOf:
+        - $ref: '#/definitions/auth-app_internal_models.User'
+        description: Updated user information
+    type: object
   auth-app_internal_models.User:
     description: User information
     properties:
@@ -47,6 +75,9 @@ definitions:
         description: User ID
         example: 1
         type: integer
+      password:
+        description: Password (will be hidden in responses)
+        type: string
       updated_at:
         description: Last update timestamp
         example: "2023-01-01T00:00:00Z"
@@ -149,6 +180,45 @@ paths:
       security:
       - BearerAuth: []
       summary: Get user profile
+      tags:
+      - user
+    put:
+      consumes:
+      - application/json
+      description: Update current user profile information
+      parameters:
+      - description: Profile update data
+        in: body
+        name: updateData
+        required: true
+        schema:
+          $ref: '#/definitions/auth-app_internal_models.UpdateProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.UpdateProfileResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/auth-app_internal_models.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update user profile
       tags:
       - user
   /register:
